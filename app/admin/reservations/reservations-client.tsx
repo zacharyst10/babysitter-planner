@@ -11,72 +11,98 @@ import {
 } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
+import { updateRequestStatus } from "@/app/actions";
 
-export default function AdminReservationsPage() {
-  // Mock pending reservations data - to be replaced with actual data from backend later
-  const [pendingReservations, setPendingReservations] = useState([
-    {
-      id: 1,
-      date: new Date(2024, 2, 27), // March 27, 2024
-      startTime: "18:00",
-      endTime: "21:00",
-      childrenCount: 2,
-      requesterName: "Emily & Jason",
-      phoneNumber: "555-123-4567",
-      notes: "The kids will have already had dinner.",
-      status: "Pending",
-    },
-    {
-      id: 2,
-      date: new Date(2024, 3, 5), // April 5, 2024
-      startTime: "17:30",
-      endTime: "20:30",
-      childrenCount: 1,
-      requesterName: "Michael & Sarah",
-      phoneNumber: "555-987-6543",
-      notes: "Sammy has a slight allergy to peanuts, but it's not severe.",
-      status: "Pending",
-    },
-  ]);
+interface BookingRequest {
+  id: number;
+  parentId: number;
+  date: string;
+  startTime: string;
+  endTime: string;
+  status: string;
+  notes: string | null;
+  parent: {
+    id: number;
+    name: string;
+    email: string;
+    phone: string;
+  };
+}
 
-  // Mock confirmed reservations
-  const [confirmedReservations, setConfirmedReservations] = useState([
-    {
-      id: 3,
-      date: new Date(2024, 2, 25), // March 25, 2024
-      startTime: "16:00",
-      endTime: "19:00",
-      childrenCount: 3,
-      requesterName: "Emily & Jason",
-      phoneNumber: "555-123-4567",
-      notes: "We'll leave some snacks in the kitchen.",
-      status: "Confirmed",
-    },
-  ]);
+interface AdminReservationsClientProps {
+  initialPendingRequests: BookingRequest[];
+  initialConfirmedRequests: BookingRequest[];
+}
 
-  const handleApproveReservation = (id: number) => {
-    // Find the reservation
-    const reservationIndex = pendingReservations.findIndex((r) => r.id === id);
-    if (reservationIndex === -1) return;
+export function AdminReservationsClient({
+  initialPendingRequests,
+  initialConfirmedRequests,
+}: AdminReservationsClientProps) {
+  const [pendingReservations, setPendingReservations] = useState(
+    initialPendingRequests
+  );
+  const [confirmedReservations, setConfirmedReservations] = useState(
+    initialConfirmedRequests
+  );
+  const [isLoading, setIsLoading] = useState(false);
 
-    // Update status to Confirmed
-    const reservation = {
-      ...pendingReservations[reservationIndex],
-      status: "Confirmed",
-    };
+  const handleApproveReservation = async (id: number) => {
+    setIsLoading(true);
+    try {
+      // Update status to Confirmed
+      const result = await updateRequestStatus({
+        requestId: id,
+        status: "confirmed",
+      });
 
-    // Remove from pending and add to confirmed
-    const newPending = pendingReservations.filter((r) => r.id !== id);
-    setPendingReservations(newPending);
-    setConfirmedReservations([...confirmedReservations, reservation]);
-
-    toast.success("Reservation approved");
+      if (result.success) {
+        // Find the reservation
+        const reservation = pendingReservations.find((r) => r.id === id);
+        if (reservation) {
+          // Update in UI
+          const updatedReservation = { ...reservation, status: "confirmed" };
+          setPendingReservations(
+            pendingReservations.filter((r) => r.id !== id)
+          );
+          setConfirmedReservations([
+            ...confirmedReservations,
+            updatedReservation,
+          ]);
+          toast.success("Reservation approved");
+        }
+      } else {
+        toast.error(result.error || "Failed to approve reservation");
+      }
+    } catch (error) {
+      console.error("Error approving reservation:", error);
+      toast.error("An unexpected error occurred");
+    } finally {
+      setIsLoading(false);
+    }
   };
 
-  const handleDeclineReservation = (id: number) => {
-    // Remove from pending
-    setPendingReservations(pendingReservations.filter((r) => r.id !== id));
-    toast.success("Reservation declined");
+  const handleDeclineReservation = async (id: number) => {
+    setIsLoading(true);
+    try {
+      // Update status to Cancelled
+      const result = await updateRequestStatus({
+        requestId: id,
+        status: "cancelled",
+      });
+
+      if (result.success) {
+        // Update in UI
+        setPendingReservations(pendingReservations.filter((r) => r.id !== id));
+        toast.success("Reservation declined");
+      } else {
+        toast.error(result.error || "Failed to decline reservation");
+      }
+    } catch (error) {
+      console.error("Error declining reservation:", error);
+      toast.error("An unexpected error occurred");
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const formatTime = (timeString: string) => {
@@ -85,6 +111,10 @@ export default function AdminReservationsPage() {
     const period = hour >= 12 ? "PM" : "AM";
     const hour12 = hour % 12 || 12;
     return `${hour12}:${minutes} ${period}`;
+  };
+
+  const formatDate = (dateString: string) => {
+    return new Date(dateString).toDateString();
   };
 
   return (
@@ -111,7 +141,7 @@ export default function AdminReservationsPage() {
                 <CardHeader className="pb-2">
                   <div className="flex justify-between items-start">
                     <div>
-                      <CardTitle>{reservation.date.toDateString()}</CardTitle>
+                      <CardTitle>{formatDate(reservation.date)}</CardTitle>
                       <CardDescription>
                         {formatTime(reservation.startTime)} -{" "}
                         {formatTime(reservation.endTime)}
@@ -126,13 +156,13 @@ export default function AdminReservationsPage() {
                   <div className="space-y-2">
                     <div className="grid grid-cols-2 gap-x-2 gap-y-1 text-sm">
                       <span className="text-muted-foreground">From:</span>
-                      <span>{reservation.requesterName}</span>
+                      <span>{reservation.parent.name}</span>
 
                       <span className="text-muted-foreground">Phone:</span>
-                      <span>{reservation.phoneNumber}</span>
+                      <span>{reservation.parent.phone}</span>
 
-                      <span className="text-muted-foreground">Children:</span>
-                      <span>{reservation.childrenCount}</span>
+                      <span className="text-muted-foreground">Email:</span>
+                      <span>{reservation.parent.email}</span>
                     </div>
 
                     {reservation.notes && (
@@ -151,12 +181,14 @@ export default function AdminReservationsPage() {
                     size="sm"
                     className="border-red-500 text-red-500 hover:bg-red-50"
                     onClick={() => handleDeclineReservation(reservation.id)}
+                    disabled={isLoading}
                   >
                     Decline
                   </Button>
                   <Button
                     size="sm"
                     onClick={() => handleApproveReservation(reservation.id)}
+                    disabled={isLoading}
                   >
                     Approve
                   </Button>
@@ -189,7 +221,7 @@ export default function AdminReservationsPage() {
                 <CardHeader className="pb-2">
                   <div className="flex justify-between items-start">
                     <div>
-                      <CardTitle>{reservation.date.toDateString()}</CardTitle>
+                      <CardTitle>{formatDate(reservation.date)}</CardTitle>
                       <CardDescription>
                         {formatTime(reservation.startTime)} -{" "}
                         {formatTime(reservation.endTime)}
@@ -204,13 +236,13 @@ export default function AdminReservationsPage() {
                   <div className="space-y-2">
                     <div className="grid grid-cols-2 gap-x-2 gap-y-1 text-sm">
                       <span className="text-muted-foreground">From:</span>
-                      <span>{reservation.requesterName}</span>
+                      <span>{reservation.parent.name}</span>
 
                       <span className="text-muted-foreground">Phone:</span>
-                      <span>{reservation.phoneNumber}</span>
+                      <span>{reservation.parent.phone}</span>
 
-                      <span className="text-muted-foreground">Children:</span>
-                      <span>{reservation.childrenCount}</span>
+                      <span className="text-muted-foreground">Email:</span>
+                      <span>{reservation.parent.email}</span>
                     </div>
 
                     {reservation.notes && (

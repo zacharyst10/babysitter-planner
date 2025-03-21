@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { useState } from "react";
 
@@ -14,21 +14,29 @@ const useIsAdmin = () => {
 
 export default function Navigation() {
   const pathname = usePathname();
+  const router = useRouter();
   const { isAdmin, setIsAdmin } = useIsAdmin();
 
-  const adminNavItems = [
-    { path: "/admin", label: "Dashboard" },
-    { path: "/admin/availability", label: "Manage Availability" },
-    { path: "/admin/reservations", label: "Reservation Requests" },
-  ];
+  // Simplified navigation - just two routes
+  const adminNavItems = [{ path: "/admin", label: "Grandparents Portal" }];
 
-  const nonAdminNavItems = [
-    { path: "/", label: "Home" },
-    { path: "/availability", label: "View Availability" },
-    { path: "/request", label: "Request Babysitting" },
-  ];
+  const nonAdminNavItems = [{ path: "/", label: "Family Portal" }];
 
   const navItems = isAdmin ? adminNavItems : nonAdminNavItems;
+
+  const handleSwitchView = () => {
+    // Toggle the state for UI consistency
+    setIsAdmin(!isAdmin);
+
+    // Navigate to the appropriate route
+    if (isAdmin) {
+      // If currently in admin view, switch to family view
+      router.push("/");
+    } else {
+      // If currently in family view, switch to admin view
+      router.push("/admin");
+    }
+  };
 
   return (
     <nav className="border-b bg-background">
@@ -52,10 +60,10 @@ export default function Navigation() {
             </Link>
           ))}
           <button
-            onClick={() => setIsAdmin(!isAdmin)}
+            onClick={handleSwitchView}
             className="ml-4 px-3 py-1 text-xs rounded-full bg-muted hover:bg-muted/80"
           >
-            {isAdmin ? "Switch to Kids View" : "Switch to Grandparents View"}
+            {isAdmin ? "Switch to Family View" : "Switch to Grandparents View"}
           </button>
         </div>
       </div>

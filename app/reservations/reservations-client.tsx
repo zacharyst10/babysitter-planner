@@ -30,8 +30,32 @@ import {
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
+import { createReservation, getUserReservations } from "@/app/actions";
+import { formatTime } from "@/app/lib/utils";
+import { useEffect } from "react";
 
-export default function ReservationsPage() {
+interface Reservation {
+  id: number;
+  date: string;
+  startTime: string;
+  endTime: string;
+  childrenCount: number;
+  status: "Pending" | "Confirmed" | "Cancelled";
+}
+
+type AvailableSlot = {
+  id: number;
+  start: string;
+  end: string;
+};
+
+interface ReservationsClientProps {
+  initialAvailableDates: Record<string, { date: Date; slots: AvailableSlot[] }>;
+}
+
+export function ReservationsClient({
+  initialAvailableDates,
+}: ReservationsClientProps) {
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(
     new Date()
   );
@@ -40,41 +64,35 @@ export default function ReservationsPage() {
   const [endTime, setEndTime] = useState("20:00"); // 8:00 PM
   const [childrenCount, setChildrenCount] = useState("1");
   const [notes, setNotes] = useState("");
+  const [reservations, setReservations] = useState<Reservation[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [availableDates] = useState(initialAvailableDates);
 
-  // Mock reservations data - to be replaced with actual data from backend later
-  const [reservations, setReservations] = useState([
-    {
-      id: 1,
-      date: new Date(2024, 2, 27), // March 27, 2024
-      startTime: "18:00",
-      endTime: "21:00",
-      childrenCount: 2,
-      status: "Confirmed",
-    },
-    {
-      id: 2,
-      date: new Date(2024, 3, 5), // April 5, 2024
-      startTime: "17:30",
-      endTime: "20:30",
-      childrenCount: 1,
-      status: "Pending",
-    },
-  ]);
+  useEffect(() => {
+    const fetchReservations = async () => {
+      setIsLoading(true);
+      try {
+        const result = await getUserReservations();
+        if (result.success && result.data) {
+          setReservations(result.data);
+        }
+      } catch (error) {
+        toast.error("Failed to load your reservations");
+        console.error(error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
 
-  // Mock available dates - to be replaced with actual data from backend later
-  const availableDates = [
-    new Date(2024, 2, 22), // March 22, 2024
-    new Date(2024, 2, 23), // March 23, 2024
-    new Date(2024, 2, 27), // March 27, 2024
-    new Date(2024, 2, 28), // March 28, 2024
-    new Date(2024, 3, 5), // April 5, 2024
-  ];
+    fetchReservations();
+  }, []);
 
   const isDateAvailable = (date: Date) => {
-    return availableDates.some((d) => d.toDateString() === date.toDateString());
+    const dateStr = date.toISOString().split("T")[0];
+    return Boolean(availableDates[dateStr]);
   };
 
-  const handleSubmitReservation = () => {
+  const handleSubmitReservation = async () => {
     if (!selectedDate) {
       toast.error("Please select a date");
       return;
@@ -86,36 +104,54 @@ export default function ReservationsPage() {
       return;
     }
 
-    // Create new reservation
-    const newReservation = {
-      id: Math.max(0, ...reservations.map((r) => r.id)) + 1,
-      date: selectedDate,
-      startTime,
-      endTime,
-      childrenCount: parseInt(childrenCount),
-      status: "Pending",
-    };
+    setIsLoading(true);
+    try {
+      const dateStr = selectedDate.toISOString().split("T")[0];
+      const result = await createReservation({
+        date: dateStr,
+        startTime,
+        endTime,
+        childrenCount: parseInt(childrenCount),
+        notes,
+      });
 
-    // Add to reservations
-    setReservations([...reservations, newReservation]);
+      if (result.success) {
+        // Close dialog and show success message
+        setIsDialogOpen(false);
+        toast.success("Reservation request submitted");
 
-    // Close dialog and show success message
-    setIsDialogOpen(false);
-    toast.success("Reservation request submitted");
+        // Fetch updated reservations
+        const reservationsResult = await getUserReservations();
+        if (reservationsResult.success && reservationsResult.data) {
+          setReservations(reservationsResult.data);
+        }
 
-    // Reset form
-    setStartTime("17:00");
-    setEndTime("20:00");
-    setChildrenCount("1");
-    setNotes("");
+        // Reset form
+        setStartTime("17:00");
+        setEndTime("20:00");
+        setChildrenCount("1");
+        setNotes("");
+      } else {
+        toast.error(result.message || "Failed to create reservation");
+      }
+    } catch (error) {
+      toast.error("Failed to create reservation");
+      console.error(error);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
-  const formatTime = (timeString: string) => {
-    const [hours, minutes] = timeString.split(":");
-    const hour = parseInt(hours, 10);
-    const period = hour >= 12 ? "PM" : "AM";
-    const hour12 = hour % 12 || 12;
-    return `${hour12}:${minutes} ${period}`;
+  const handleCancelReservation = async (id: number) => {
+    try {
+      // Here you would call an API to cancel the reservation
+      // For now, just update the local state
+      setReservations(reservations.filter((r) => r.id !== id));
+      toast.success("Reservation cancelled");
+    } catch (error) {
+      toast.error("Failed to cancel reservation");
+      console.error(error);
+    }
   };
 
   return (
@@ -162,7 +198,9 @@ export default function ReservationsPage() {
                 <DialogTrigger asChild>
                   <Button
                     disabled={
-                      !selectedDate || !isDateAvailable(selectedDate as Date)
+                      !selectedDate ||
+                      !isDateAvailable(selectedDate as Date) ||
+                      isLoading
                     }
                   >
                     Book This Date
@@ -244,11 +282,15 @@ export default function ReservationsPage() {
                     <Button
                       variant="outline"
                       onClick={() => setIsDialogOpen(false)}
+                      disabled={isLoading}
                     >
                       Cancel
                     </Button>
-                    <Button onClick={handleSubmitReservation}>
-                      Submit Reservation
+                    <Button
+                      onClick={handleSubmitReservation}
+                      disabled={isLoading}
+                    >
+                      {isLoading ? "Submitting..." : "Submit Reservation"}
                     </Button>
                   </DialogFooter>
                 </DialogContent>
@@ -266,7 +308,9 @@ export default function ReservationsPage() {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              {reservations.length > 0 ? (
+              {isLoading ? (
+                <p>Loading your reservations...</p>
+              ) : reservations.length > 0 ? (
                 <div className="space-y-4">
                   {reservations.map((reservation) => (
                     <div
@@ -275,7 +319,7 @@ export default function ReservationsPage() {
                     >
                       <div>
                         <p className="font-medium">
-                          {reservation.date.toDateString()}
+                          {new Date(reservation.date).toDateString()}
                         </p>
                         <p className="text-sm text-muted-foreground">
                           {formatTime(reservation.startTime)} -{" "}
@@ -290,25 +334,24 @@ export default function ReservationsPage() {
                           className={`text-sm rounded-full px-2.5 py-0.5 ${
                             reservation.status === "Confirmed"
                               ? "bg-green-100 text-green-800"
-                              : "bg-yellow-100 text-yellow-800"
+                              : reservation.status === "Cancelled"
+                                ? "bg-red-100 text-red-800"
+                                : "bg-yellow-100 text-yellow-800"
                           }`}
                         >
                           {reservation.status}
                         </span>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => {
-                            setReservations(
-                              reservations.filter(
-                                (r) => r.id !== reservation.id
-                              )
-                            );
-                            toast.success("Reservation cancelled");
-                          }}
-                        >
-                          Cancel
-                        </Button>
+                        {reservation.status !== "Cancelled" && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() =>
+                              handleCancelReservation(reservation.id)
+                            }
+                          >
+                            Cancel
+                          </Button>
+                        )}
                       </div>
                     </div>
                   ))}
